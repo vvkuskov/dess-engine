@@ -1,5 +1,5 @@
 use std::{
-    ffi::{CString, c_char, c_void},
+    ffi::{CString, c_void},
     sync::Arc,
 };
 
@@ -59,7 +59,7 @@ impl<'a> InstanceBuilder<'a> {
         let instance = unsafe { entry.create_instance(&desc, None) }?;
         info!("Created a Vulkan instance");
 
-        let (debug) = if self.debug {
+        let debug = if self.debug {
             let utils = ash::ext::debug_utils::Instance::new(&entry, &instance);
             let info = vk::DebugUtilsMessengerCreateInfoEXT::default()
                 .message_type(
@@ -102,6 +102,9 @@ impl Drop for Instance {
     fn drop(&mut self) {
         if let Some((debug, messenger)) = self.debug.take() {
             unsafe { debug.destroy_debug_utils_messenger(messenger, None) };
+        }
+        unsafe {
+            self.raw.destroy_instance(None);
         }
     }
 }
