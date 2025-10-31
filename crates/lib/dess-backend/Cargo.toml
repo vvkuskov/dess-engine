@@ -1,0 +1,10 @@
+[package]
+name = "dess-backend"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ash = "0.38.0"
+ash-window = "0.13.0"
+thiserror = "2.0.17"
+log = "0.4.28"
