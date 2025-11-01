@@ -8,7 +8,7 @@ use log::{error, info, trace, warn};
 use crate::BackendError;
 
 pub struct Instance {
-    _entry: ash::Entry,
+    pub(crate) entry: ash::Entry,
     pub raw: ash::Instance,
     debug: Option<(ash::ext::debug_utils::Instance, vk::DebugUtilsMessengerEXT)>,
 }
@@ -85,7 +85,7 @@ impl<'a> InstanceBuilder<'a> {
         };
 
         Ok(Instance {
-            _entry: entry,
+            entry,
             raw: instance,
             debug,
         }
