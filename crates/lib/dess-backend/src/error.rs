@@ -8,6 +8,12 @@ pub enum BackendError {
     VulkanError(#[from] ash::vk::Result),
     #[error("Can't get display/window handle: {0:?}")]
     RawWindowHandleError(raw_window_handle::HandleError),
+    #[error("Failed to find queue family")]
+    NoSuitableQueue,
+    #[error("Failed to allocate memory: {0:?} {1:?}")]
+    MemoryAllocationFailed(gpu_alloc::AllocationError, gpu_alloc::Request),
+    #[error("Failed to allocate descriptors {0:?}")]
+    DescriptorAllocationFailed(#[from] gpu_descriptor::AllocationError),
 }
 
 impl From<ash::LoadingError> for BackendError {

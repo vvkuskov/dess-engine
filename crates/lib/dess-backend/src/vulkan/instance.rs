@@ -105,6 +105,10 @@ impl Instance {
             None
         }
     }
+
+    pub fn version(&self) -> u32 {
+        vk::make_api_version(0, 1, 3, 0)
+    }
 }
 
 impl Drop for Instance {
