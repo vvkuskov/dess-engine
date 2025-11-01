@@ -1,5 +1,7 @@
 use std::{
-    ffi::{CString, c_void}, fmt::Debug, sync::Arc
+    ffi::{CString, c_void},
+    fmt::Debug,
+    sync::Arc,
 };
 
 use ash::vk;
@@ -15,7 +17,9 @@ pub struct Instance {
 
 impl Debug for Instance {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Instance").field("raw", &self.raw.handle()).finish()
+        f.debug_struct("Instance")
+            .field("raw", &self.raw.handle())
+            .finish()
     }
 }
 

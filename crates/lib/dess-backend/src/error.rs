@@ -7,7 +7,7 @@ pub enum BackendError {
     #[error("Vulkan error: {0:?}")]
     VulkanError(#[from] ash::vk::Result),
     #[error("Can't get display/window handle: {0:?}")]
-    RawWindowHandleError(raw_window_handle::HandleError)
+    RawWindowHandleError(raw_window_handle::HandleError),
 }
 
 impl From<ash::LoadingError> for BackendError {
