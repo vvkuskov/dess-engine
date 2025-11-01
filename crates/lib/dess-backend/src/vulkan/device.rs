@@ -314,10 +314,7 @@ impl Device {
             )?;
             let mut frame_drop_list = frame.drop_list.lock();
             let mut current_drop_list = self.current_drop_list.lock();
-            mem::swap(
-                &mut frame_drop_list,
-                &mut current_drop_list,
-            );
+            mem::swap(&mut frame_drop_list, &mut current_drop_list);
         }
         Ok(frame.clone())
     }
