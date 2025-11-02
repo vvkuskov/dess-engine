@@ -14,8 +14,8 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy)]
-struct Queue {
-    raw: vk::Queue,
+pub(crate) struct Queue {
+    pub raw: vk::Queue,
     pub queue_family_index: u32,
 }
 
@@ -30,9 +30,9 @@ impl Queue {
 
 pub struct Device {
     pub raw: ash::Device,
-    pdevice: PhysicalDevice,
-    instance: Arc<Instance>,
-    main_queue: Queue,
+    pub pdevice: PhysicalDevice,
+    pub instance: Arc<Instance>,
+    pub(crate) main_queue: Queue,
     current_drop_list: Mutex<DropList>,
     memory_allocator: Mutex<GpuMemoryAllocator>,
     descriptor_allocator: Mutex<DescriptorAllocator>,

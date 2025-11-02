@@ -1,4 +1,4 @@
-use std::{fmt::Debug, sync::Arc};
+use std::fmt::Debug;
 
 use ash::vk;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -7,7 +7,7 @@ use crate::{BackendError, vulkan::Instance};
 
 pub struct Surface {
     pub raw: vk::SurfaceKHR,
-    loader: ash::khr::surface::Instance,
+    pub loader: ash::khr::surface::Instance,
 }
 
 impl Debug for Surface {
@@ -21,7 +21,7 @@ impl Instance {
         &self,
         display: &impl HasDisplayHandle,
         window: &impl HasWindowHandle,
-    ) -> Result<Arc<Surface>, BackendError> {
+    ) -> Result<Surface, BackendError> {
         let surface = unsafe {
             ash_window::create_surface(
                 &self.entry,
@@ -35,8 +35,7 @@ impl Instance {
         Ok(Surface {
             raw: surface,
             loader,
-        }
-        .into())
+        })
     }
 }
 
