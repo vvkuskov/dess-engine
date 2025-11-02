@@ -397,6 +397,9 @@ impl Drop for Device {
                 .unwrap();
             frame.free(&self.raw);
         }
+        self.samplers.drain().for_each(|(_, sampler)| unsafe {
+            self.raw.destroy_sampler(sampler, None);
+        });
         unsafe {
             memory_allocator.cleanup(AshMemoryDevice::wrap(&self.raw));
             descriptor_allocator.cleanup(AshDescriptorDevice::wrap(&self.raw));
