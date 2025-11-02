@@ -7,6 +7,7 @@ use crate::{DescriptorAllocator, DescriptorSet, GpuMemory, GpuMemoryAllocator};
 #[derive(Debug, Default)]
 pub struct DropList {
     images: Vec<vk::Image>,
+    views: Vec<vk::ImageView>,
     buffers: Vec<vk::Buffer>,
     memory: Vec<GpuMemory>,
     descriptors: Vec<DescriptorSet>,
@@ -15,6 +16,10 @@ pub struct DropList {
 impl DropList {
     pub fn drop_image(&mut self, image: vk::Image) {
         self.images.push(image);
+    }
+
+    pub fn drop_image_view(&mut self, view: vk::ImageView) {
+        self.views.push(view);
     }
 
     pub fn drop_buffer(&mut self, buffer: vk::Buffer) {
@@ -37,6 +42,9 @@ impl DropList {
     ) {
         self.images.drain(..).for_each(|image| unsafe {
             device.destroy_image(image, None);
+        });
+        self.views.drain(..).for_each(|view| unsafe {
+            device.destroy_image_view(view, None);
         });
         self.buffers.drain(..).for_each(|buffer| unsafe {
             device.destroy_buffer(buffer, None);
