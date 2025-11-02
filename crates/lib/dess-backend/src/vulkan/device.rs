@@ -184,7 +184,8 @@ impl Device {
             .descriptor_binding_sampled_image_update_after_bind(true)
             .descriptor_binding_storage_buffer_update_after_bind(true)
             .shader_sampled_image_array_non_uniform_indexing(true)
-            .shader_storage_buffer_array_non_uniform_indexing(true);
+            .shader_storage_buffer_array_non_uniform_indexing(true)
+            .descriptor_binding_partially_bound(true);
 
         let main_queue = pdevice
             .queue_families
