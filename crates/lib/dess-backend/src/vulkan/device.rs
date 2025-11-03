@@ -165,7 +165,11 @@ impl DeviceFrame {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct SamplerDesc(vk::Filter, vk::SamplerMipmapMode, vk::SamplerAddressMode);
+pub struct SamplerDesc(
+    pub vk::Filter,
+    pub vk::SamplerMipmapMode,
+    pub vk::SamplerAddressMode,
+);
 
 impl Device {
     pub fn new(
