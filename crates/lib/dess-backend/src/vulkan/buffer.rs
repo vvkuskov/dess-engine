@@ -63,6 +63,11 @@ impl BufferDesc {
         self.location = gpu_alloc::UsageFlags::DOWNLOAD;
         self
     }
+
+    pub fn aligment(mut self, value: u64) -> Self {
+        self.aligment = Some(value);
+        self
+    }
 }
 
 #[derive(Debug)]
