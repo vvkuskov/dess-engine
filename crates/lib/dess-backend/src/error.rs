@@ -12,6 +12,8 @@ pub enum BackendError {
     NoSuitableQueue,
     #[error("Failed to allocate memory: {0:?} {1:?}")]
     MemoryAllocationFailed(gpu_alloc::AllocationError, gpu_alloc::Request),
+    #[error("Memory map failed: {0:?}")]
+    MemoryMappingFailed(#[from] gpu_alloc::MapError),
     #[error("Failed to allocate descriptors {0:?}")]
     DescriptorAllocationFailed(#[from] gpu_descriptor::AllocationError),
 }
