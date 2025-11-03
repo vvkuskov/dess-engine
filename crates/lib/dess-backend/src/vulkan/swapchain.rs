@@ -57,6 +57,14 @@ impl SwapchainImage {
             render_finished,
         })
     }
+
+    fn free(self, device: &ash::Device) {
+        self.image.clear_views();
+        unsafe {
+            device.destroy_semaphore(self.acquire, None);
+            device.destroy_semaphore(self.render_finished, None);
+        }
+    }
 }
 
 pub enum AcquireResult<'a> {
@@ -198,5 +206,14 @@ impl Swapchain {
                 }
             }
         }
+    }
+}
+
+impl Drop for Swapchain {
+    fn drop(&mut self) {
+        self.images
+            .drain(..)
+            .for_each(|image| image.free(&self.device.raw));
+        unsafe { self.loader.destroy_swapchain(self.raw, None) };
     }
 }
