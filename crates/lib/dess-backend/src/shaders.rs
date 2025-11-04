@@ -106,31 +106,50 @@ impl ShaderPipelineCommon {
                                 vk::SamplerAddressMode::REPEAT,
                             ))
                             .unwrap();
-                        binding.immutable_samplers(slice::from_ref(samplers.add(sampler)));
+                        binding =
+                            binding.immutable_samplers(slice::from_ref(samplers.add(sampler)));
                     }
                     binding
                 })
                 .collect::<Vec<_>>();
             let mut count = gpu_descriptor::DescriptorTotalCount::default();
-            set.iter().for_each(|desc| match desc.1 {
-                vk::DescriptorType::SAMPLED_IMAGE => count.sampled_image += desc.2.as_count(),
-                vk::DescriptorType::SAMPLER => count.sampler += desc.2.as_count(),
-                vk::DescriptorType::STORAGE_BUFFER => count.storage_buffer += desc.2.as_count(),
-                vk::DescriptorType::STORAGE_BUFFER_DYNAMIC => {
-                    count.storage_buffer_dynamic += desc.2.as_count()
+            let desc_count = set.iter().map(|x| x.0).max().unwrap_or(0);
+            let mut flags = vec![vk::DescriptorBindingFlags::empty(); desc_count as usize];
+            set.iter().for_each(|desc| {
+                if desc.2.is_bindless() {
+                    flags[desc.0 as usize] = vk::DescriptorBindingFlags::PARTIALLY_BOUND
+                        | vk::DescriptorBindingFlags::UPDATE_AFTER_BIND
                 }
-                vk::DescriptorType::STORAGE_IMAGE => count.storage_image += desc.2.as_count(),
-                vk::DescriptorType::UNIFORM_BUFFER => count.uniform_buffer += desc.2.as_count(),
-                vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC => {
-                    count.uniform_buffer_dynamic += desc.2.as_count()
+                match desc.1 {
+                    vk::DescriptorType::SAMPLED_IMAGE => count.sampled_image += desc.2.as_count(),
+                    vk::DescriptorType::SAMPLER => count.sampler += desc.2.as_count(),
+                    vk::DescriptorType::STORAGE_BUFFER => count.storage_buffer += desc.2.as_count(),
+                    vk::DescriptorType::STORAGE_BUFFER_DYNAMIC => {
+                        count.storage_buffer_dynamic += desc.2.as_count()
+                    }
+                    vk::DescriptorType::STORAGE_IMAGE => count.storage_image += desc.2.as_count(),
+                    vk::DescriptorType::UNIFORM_BUFFER => count.uniform_buffer += desc.2.as_count(),
+                    vk::DescriptorType::UNIFORM_BUFFER_DYNAMIC => {
+                        count.uniform_buffer_dynamic += desc.2.as_count()
+                    }
+                    vk::DescriptorType::COMBINED_IMAGE_SAMPLER => {
+                        count.combined_image_sampler += desc.2.as_count()
+                    }
+                    _ => panic!("Descriptor type {:?} not supported", desc.1),
                 }
-                vk::DescriptorType::COMBINED_IMAGE_SAMPLER => {
-                    count.combined_image_sampler += desc.2.as_count()
-                }
-                _ => panic!("Descriptor type {:?} not supported", desc.1),
             });
             pool_sizes[index as usize] = count;
-            let info = vk::DescriptorSetLayoutCreateInfo::default().bindings(&bindings);
+            let flag = if set.iter().any(|x| x.2.is_bindless()) {
+                vk::DescriptorSetLayoutCreateFlags::UPDATE_AFTER_BIND_POOL
+            } else {
+                vk::DescriptorSetLayoutCreateFlags::empty()
+            };
+            let mut binding_flags =
+                vk::DescriptorSetLayoutBindingFlagsCreateInfo::default().binding_flags(&flags);
+            let info = vk::DescriptorSetLayoutCreateInfo::default()
+                .bindings(&bindings)
+                .flags(flag)
+                .push_next(&mut binding_flags);
             let set_layout = unsafe { device.raw.create_descriptor_set_layout(&info, None) }?;
             set_layouts[index as usize] = set_layout;
         }
