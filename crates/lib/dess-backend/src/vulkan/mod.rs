@@ -3,6 +3,7 @@ mod device;
 mod image;
 mod instance;
 mod physical_device;
+mod shaders;
 mod surface;
 mod swapchain;
 
@@ -11,5 +12,6 @@ pub use device::*;
 pub use image::*;
 pub use instance::*;
 pub use physical_device::*;
+pub use shaders::*;
 pub use surface::*;
 pub use swapchain::*;

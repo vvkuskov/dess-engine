@@ -1,4 +1,4 @@
-use std::{ops::Deref, slice};
+use std::{ffi::CString, fmt::Debug, ops::Deref, slice, sync::Arc};
 
 use ash::vk;
 
@@ -21,6 +21,7 @@ pub struct ShaderPipelineCommon {
 
 #[derive(Debug)]
 pub struct ComputePipeline {
+    device: Arc<Device>,
     pub pipeline: vk::Pipeline,
     pub common: ShaderPipelineCommon,
     pub group_size: [u32; 3],
@@ -36,6 +37,7 @@ impl Deref for ComputePipeline {
 
 #[derive(Debug)]
 pub struct RasterPipeline {
+    device: Arc<Device>,
     pub pipeline: vk::Pipeline,
     pub common: ShaderPipelineCommon,
 }
@@ -164,12 +166,197 @@ impl ShaderPipelineCommon {
         })
     }
 
-    fn free(mut self, device: &ash::Device) {
+    fn free(&mut self, device: &ash::Device) {
         unsafe { device.destroy_pipeline_layout(self.pipeline_layout, None) };
         self.descriptor_set_layouts
             .drain(..)
             .for_each(|layout| unsafe {
                 device.destroy_descriptor_set_layout(layout, None);
             });
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ClearAttachment {
+    None,
+    Color([u8; 4]),
+    Depth(f32),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct AttachmentDesc {
+    pub format: vk::Format,
+    pub load: vk::AttachmentLoadOp,
+    pub store: vk::AttachmentStoreOp,
+    pub clean: ClearAttachment,
+}
+
+impl Default for AttachmentDesc {
+    fn default() -> Self {
+        Self {
+            format: vk::Format::UNDEFINED,
+            load: vk::AttachmentLoadOp::LOAD,
+            store: vk::AttachmentStoreOp::STORE,
+            clean: ClearAttachment::None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RenderTargetDesc<'a> {
+    pub color: &'a [AttachmentDesc],
+    pub depth: Option<AttachmentDesc>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RasterPipelineDesc<'a> {
+    pub layout: &'a DescriptorSetDesc<'a>,
+    pub render_target: &'a RenderTargetDesc<'a>,
+    pub primitive: vk::PrimitiveTopology,
+    pub depth_test: Option<vk::CompareOp>,
+    pub depth_write: bool,
+    pub cull: vk::CullModeFlags,
+    pub front: vk::FrontFace,
+    pub blend: Option<(vk::BlendOp, vk::BlendFactor, vk::BlendFactor)>,
+}
+
+impl<'a> RasterPipelineDesc<'a> {
+    pub fn new(layout: &'a DescriptorSetDesc<'a>, render_target: &'a RenderTargetDesc<'a>) -> Self {
+        Self {
+            layout,
+            render_target,
+            primitive: vk::PrimitiveTopology::TRIANGLE_LIST,
+            depth_test: None,
+            depth_write: true,
+            front: vk::FrontFace::CLOCKWISE,
+            cull: vk::CullModeFlags::BACK,
+            blend: None,
+        }
+    }
+
+    pub fn primitive(mut self, value: vk::PrimitiveTopology) -> Self {
+        self.primitive = value;
+        self
+    }
+
+    pub fn depth_test(mut self, value: vk::CompareOp) -> Self {
+        self.depth_test = Some(value);
+        self
+    }
+
+    pub fn depth_write(mut self, value: bool) -> Self {
+        self.depth_write = value;
+        self
+    }
+
+    pub fn front(mut self, value: vk::FrontFace) -> Self {
+        self.front = value;
+        self
+    }
+
+    pub fn cull(mut self, value: vk::CullModeFlags) -> Self {
+        self.cull = value;
+        self
+    }
+
+    pub fn blend(mut self, op: vk::BlendOp, src: vk::BlendFactor, dst: vk::BlendFactor) -> Self {
+        self.blend = Some((op, src, dst));
+        self
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Shader {
+    pub module: vk::ShaderModule,
+    pub stage: vk::ShaderStageFlags,
+    pub entry: CString,
+}
+
+impl RasterPipeline {
+    pub fn new(
+        device: Arc<Device>,
+        shaders: &[Shader],
+        desc: RasterPipelineDesc,
+    ) -> Result<Self, BackendError> {
+        let common = ShaderPipelineCommon::new(
+            &device,
+            desc.layout,
+            vk::ShaderStageFlags::ALL_GRAPHICS,
+            vk::PipelineBindPoint::GRAPHICS,
+        )?;
+        let shaders = shaders
+            .iter()
+            .map(|shader| {
+                vk::PipelineShaderStageCreateInfo::default()
+                    .module(shader.module)
+                    .stage(shader.stage)
+                    .name(&shader.entry)
+            })
+            .collect::<Vec<_>>();
+        let assembly_state =
+            vk::PipelineInputAssemblyStateCreateInfo::default().topology(desc.primitive);
+        let raster_state = vk::PipelineRasterizationStateCreateInfo::default()
+            .cull_mode(desc.cull)
+            .front_face(desc.front);
+        let depth_stencil_state = vk::PipelineDepthStencilStateCreateInfo::default()
+            .depth_test_enable(desc.depth_test.is_some())
+            .depth_write_enable(desc.depth_write)
+            .depth_compare_op(desc.depth_test.unwrap_or(vk::CompareOp::ALWAYS));
+        let blend_attachments = if let Some((op, src, dst)) = desc.blend {
+            // fixme: alpha?
+            let blend_attachment = vk::PipelineColorBlendAttachmentState::default()
+                .blend_enable(true)
+                .color_blend_op(op)
+                .src_color_blend_factor(src)
+                .src_alpha_blend_factor(src)
+                .dst_color_blend_factor(dst)
+                .dst_alpha_blend_factor(dst);
+            vec![blend_attachment; desc.render_target.color.len()]
+        } else {
+            vec![vk::PipelineColorBlendAttachmentState::default(); desc.render_target.color.len()]
+        };
+        let blend_state =
+            vk::PipelineColorBlendStateCreateInfo::default().attachments(&blend_attachments);
+        let dynamic_state = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
+        let color_formats = desc
+            .render_target
+            .color
+            .iter()
+            .map(|x| x.format)
+            .collect::<Vec<_>>();
+        let mut rendering =
+            vk::PipelineRenderingCreateInfo::default().color_attachment_formats(&color_formats);
+        if let Some(depth) = desc.render_target.depth {
+            rendering = rendering.depth_attachment_format(depth.format);
+        }
+        let info = vk::GraphicsPipelineCreateInfo::default()
+            .layout(common.pipeline_layout)
+            .depth_stencil_state(&depth_stencil_state)
+            .rasterization_state(&raster_state)
+            .stages(&shaders)
+            .input_assembly_state(&assembly_state)
+            .color_blend_state(&blend_state)
+            .dynamic_state(&dynamic_state)
+            .push_next(&mut rendering);
+        let pipeline = unsafe {
+            device.raw.create_graphics_pipelines(
+                vk::PipelineCache::null(),
+                slice::from_ref(&info),
+                None,
+            )
+        }
+        .map_err(|(_, err)| BackendError::VulkanError(err))?[0];
+        Ok(Self {
+            device,
+            pipeline,
+            common,
+        })
+    }
+}
+
+impl Drop for RasterPipeline {
+    fn drop(&mut self) {
+        unsafe { self.device.raw.destroy_pipeline(self.pipeline, None) };
+        self.common.free(&self.device.raw);
     }
 }
