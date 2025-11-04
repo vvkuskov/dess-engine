@@ -89,7 +89,7 @@ impl ShaderPipelineCommon {
         let mut pool_sizes =
             vec![gpu_descriptor::DescriptorTotalCount::default(); set_count as usize];
         let samplers = TempList::new();
-        for (index, set) in desc.0.into_iter().copied() {
+        for (index, set) in desc.0.iter().copied() {
             let bindings = set
                 .iter()
                 .map(|desc| {
@@ -317,7 +317,8 @@ impl RasterPipeline {
         };
         let blend_state =
             vk::PipelineColorBlendStateCreateInfo::default().attachments(&blend_attachments);
-        let dynamic_state = vk::PipelineDynamicStateCreateInfo::default().dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
+        let dynamic_state = vk::PipelineDynamicStateCreateInfo::default()
+            .dynamic_states(&[vk::DynamicState::VIEWPORT, vk::DynamicState::SCISSOR]);
         let color_formats = desc
             .render_target
             .color
@@ -355,6 +356,54 @@ impl RasterPipeline {
 }
 
 impl Drop for RasterPipeline {
+    fn drop(&mut self) {
+        unsafe { self.device.raw.destroy_pipeline(self.pipeline, None) };
+        self.common.free(&self.device.raw);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ComputePipelineDesc<'a> {
+    pub desc: &'a DescriptorSetDesc<'a>,
+    pub shader: Shader,
+    pub group_size: [u32; 3],
+}
+
+impl ComputePipeline {
+    pub fn new(
+        device: Arc<Device>,
+        shader: Shader,
+        desc: &ComputePipelineDesc,
+    ) -> Result<Self, BackendError> {
+        let common = ShaderPipelineCommon::new(
+            &device,
+            desc.desc,
+            vk::ShaderStageFlags::COMPUTE,
+            vk::PipelineBindPoint::COMPUTE,
+        )?;
+        let shader = vk::PipelineShaderStageCreateInfo::default()
+            .module(shader.module)
+            .name(&shader.entry)
+            .stage(shader.stage);
+        let info = vk::ComputePipelineCreateInfo::default()
+            .stage(shader)
+            .layout(common.pipeline_layout);
+        let pipeline = unsafe {
+            device
+                .raw
+                .create_compute_pipelines(vk::PipelineCache::null(), slice::from_ref(&info), None)
+                .map_err(|(_, err)| BackendError::VulkanError(err))?[0]
+        };
+        Ok(Self {
+            device,
+            pipeline,
+            common,
+            group_size: desc.group_size,
+        })
+    }
+}
+
+impl Drop for ComputePipeline {
     fn drop(&mut self) {
         unsafe { self.device.raw.destroy_pipeline(self.pipeline, None) };
         self.common.free(&self.device.raw);
