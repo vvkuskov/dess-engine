@@ -1,4 +1,4 @@
-use std::{ffi::CString, fmt::Debug, ops::Deref, slice, sync::Arc};
+use std::{collections::HashMap, ffi::CString, fmt::Debug, ops::Deref, slice, sync::Arc};
 
 use ash::vk;
 
@@ -74,22 +74,35 @@ impl DescriptorCount {
 #[derive(Debug, Clone, Copy)]
 pub struct DescriptorDesc(pub u32, pub vk::DescriptorType, pub DescriptorCount);
 
-#[derive(Debug, Clone, Copy)]
-pub struct DescriptorSetDesc<'a>(pub &'a [(u32, &'a [DescriptorDesc])]);
+#[derive(Debug, Clone, Default)]
+pub struct PipelineLayoutDesc(pub HashMap<u32, Vec<DescriptorDesc>>);
+
+impl PipelineLayoutDesc {
+    pub fn descriptor_set(
+        mut self,
+        index: u32,
+        set: impl IntoIterator<Item = DescriptorDesc>,
+    ) -> Self {
+        let set = set.into_iter().collect();
+        self.0.insert(index, set);
+        self
+    }
+}
 
 impl ShaderPipelineCommon {
     fn new(
         device: &Device,
-        desc: &DescriptorSetDesc,
+        desc: &PipelineLayoutDesc,
         stage: vk::ShaderStageFlags,
         bind_point: vk::PipelineBindPoint,
     ) -> Result<ShaderPipelineCommon, BackendError> {
-        let set_count = desc.0.iter().map(|x| x.0).max().unwrap_or(0);
+        let set_count = desc.0.iter().map(|x| x.0).max().copied().unwrap_or(0);
         let mut set_layouts = vec![vk::DescriptorSetLayout::null(); set_count as usize];
         let mut pool_sizes =
             vec![gpu_descriptor::DescriptorTotalCount::default(); set_count as usize];
         let samplers = TempList::new();
-        for (index, set) in desc.0.iter().copied() {
+        for (index, set) in desc.0.iter() {
+            let index = *index;
             let bindings = set
                 .iter()
                 .map(|desc| {
@@ -188,7 +201,7 @@ pub struct AttachmentDesc {
     pub format: vk::Format,
     pub load: vk::AttachmentLoadOp,
     pub store: vk::AttachmentStoreOp,
-    pub clean: ClearAttachment,
+    pub clear: ClearAttachment,
 }
 
 impl Default for AttachmentDesc {
@@ -197,75 +210,55 @@ impl Default for AttachmentDesc {
             format: vk::Format::UNDEFINED,
             load: vk::AttachmentLoadOp::LOAD,
             store: vk::AttachmentStoreOp::STORE,
-            clean: ClearAttachment::None,
+            clear: ClearAttachment::None,
         }
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct RenderTargetDesc<'a> {
-    pub color: &'a [AttachmentDesc],
+impl AttachmentDesc {
+    pub fn new(format: vk::Format) -> Self {
+        Self {
+            format,
+            ..Default::default()
+        }
+    }
+
+    pub fn discard(mut self) -> Self {
+        self.store = vk::AttachmentStoreOp::DONT_CARE;
+        self
+    }
+
+    pub fn garbage(mut self) -> Self {
+        self.load = vk::AttachmentLoadOp::DONT_CARE;
+        self
+    }
+
+    pub fn clear(mut self, value: ClearAttachment) -> Self {
+        self.load = vk::AttachmentLoadOp::CLEAR;
+        self.clear = value;
+        self
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RenderTargetDesc {
+    pub color: Vec<AttachmentDesc>,
     pub depth: Option<AttachmentDesc>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct RasterPipelineDesc<'a> {
-    pub layout: &'a DescriptorSetDesc<'a>,
-    pub render_target: &'a RenderTargetDesc<'a>,
-    pub primitive: vk::PrimitiveTopology,
-    pub depth_test: Option<vk::CompareOp>,
-    pub depth_write: bool,
-    pub cull: vk::CullModeFlags,
-    pub front: vk::FrontFace,
-    pub blend: Option<(vk::BlendOp, vk::BlendFactor, vk::BlendFactor)>,
-}
-
-impl<'a> RasterPipelineDesc<'a> {
-    pub fn new(layout: &'a DescriptorSetDesc<'a>, render_target: &'a RenderTargetDesc<'a>) -> Self {
-        Self {
-            layout,
-            render_target,
-            primitive: vk::PrimitiveTopology::TRIANGLE_LIST,
-            depth_test: None,
-            depth_write: true,
-            front: vk::FrontFace::CLOCKWISE,
-            cull: vk::CullModeFlags::BACK,
-            blend: None,
-        }
-    }
-
-    pub fn primitive(mut self, value: vk::PrimitiveTopology) -> Self {
-        self.primitive = value;
+impl RenderTargetDesc {
+    pub fn color(mut self, target: AttachmentDesc) -> Self {
+        self.color.push(target);
         self
     }
 
-    pub fn depth_test(mut self, value: vk::CompareOp) -> Self {
-        self.depth_test = Some(value);
-        self
-    }
-
-    pub fn depth_write(mut self, value: bool) -> Self {
-        self.depth_write = value;
-        self
-    }
-
-    pub fn front(mut self, value: vk::FrontFace) -> Self {
-        self.front = value;
-        self
-    }
-
-    pub fn cull(mut self, value: vk::CullModeFlags) -> Self {
-        self.cull = value;
-        self
-    }
-
-    pub fn blend(mut self, op: vk::BlendOp, src: vk::BlendFactor, dst: vk::BlendFactor) -> Self {
-        self.blend = Some((op, src, dst));
+    pub fn depth(mut self, target: AttachmentDesc) -> Self {
+        self.depth = Some(target);
         self
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ShaderDesc {
     pub bytecode: Vec<u32>,
     pub stage: vk::ShaderStageFlags,
@@ -306,19 +299,79 @@ impl ShaderModule {
     }
 }
 
-impl RasterPipeline {
+#[derive(Debug, Clone)]
+pub struct RasterPipelineDesc {
+    pub shaders: Vec<ShaderDesc>,
+    pub layout: PipelineLayoutDesc,
+    pub render_target: RenderTargetDesc,
+    pub topology: vk::PrimitiveTopology,
+    pub depth_test: Option<vk::CompareOp>,
+    pub depth_write: bool,
+    pub cull: vk::CullModeFlags,
+    pub front: vk::FrontFace,
+    pub blend: Option<(vk::BlendOp, vk::BlendFactor, vk::BlendFactor)>,
+}
+
+impl RasterPipelineDesc {
     pub fn new(
-        device: Arc<Device>,
-        shaders: &[ShaderDesc],
-        desc: RasterPipelineDesc,
-    ) -> Result<Self, BackendError> {
+        layout: PipelineLayoutDesc,
+        render_target: RenderTargetDesc,
+        shaders: impl IntoIterator<Item = ShaderDesc>,
+    ) -> Self {
+        Self {
+            shaders: shaders.into_iter().collect(),
+            layout,
+            render_target,
+            topology: vk::PrimitiveTopology::TRIANGLE_LIST,
+            depth_test: None,
+            depth_write: true,
+            front: vk::FrontFace::CLOCKWISE,
+            cull: vk::CullModeFlags::BACK,
+            blend: None,
+        }
+    }
+
+    pub fn topology(mut self, value: vk::PrimitiveTopology) -> Self {
+        self.topology = value;
+        self
+    }
+
+    pub fn depth_test(mut self, value: vk::CompareOp) -> Self {
+        self.depth_test = Some(value);
+        self
+    }
+
+    pub fn depth_write(mut self, value: bool) -> Self {
+        self.depth_write = value;
+        self
+    }
+
+    pub fn front(mut self, value: vk::FrontFace) -> Self {
+        self.front = value;
+        self
+    }
+
+    pub fn cull(mut self, value: vk::CullModeFlags) -> Self {
+        self.cull = value;
+        self
+    }
+
+    pub fn blend(mut self, op: vk::BlendOp, src: vk::BlendFactor, dst: vk::BlendFactor) -> Self {
+        self.blend = Some((op, src, dst));
+        self
+    }
+}
+
+impl RasterPipeline {
+    pub fn new(device: Arc<Device>, desc: RasterPipelineDesc) -> Result<Self, BackendError> {
         let common = ShaderPipelineCommon::new(
             &device,
-            desc.layout,
+            &desc.layout,
             vk::ShaderStageFlags::ALL_GRAPHICS,
             vk::PipelineBindPoint::GRAPHICS,
         )?;
-        let compiled_shaders = shaders
+        let compiled_shaders = desc
+            .shaders
             .iter()
             .map(|shader| shader.compile(&device.raw).unwrap())
             .collect::<Vec<_>>();
@@ -332,7 +385,7 @@ impl RasterPipeline {
             })
             .collect::<Vec<_>>();
         let assembly_state =
-            vk::PipelineInputAssemblyStateCreateInfo::default().topology(desc.primitive);
+            vk::PipelineInputAssemblyStateCreateInfo::default().topology(desc.topology);
         let raster_state = vk::PipelineRasterizationStateCreateInfo::default()
             .cull_mode(desc.cull)
             .front_face(desc.front);
@@ -404,29 +457,35 @@ impl Drop for RasterPipeline {
 }
 
 #[derive(Debug)]
-pub struct ComputePipelineDesc<'a> {
-    pub desc: &'a DescriptorSetDesc<'a>,
+pub struct ComputePipelineDesc {
+    pub desc: PipelineLayoutDesc,
     pub shader: ShaderDesc,
     pub group_size: [u32; 3],
 }
 
+impl ComputePipelineDesc {
+    pub fn new(desc: PipelineLayoutDesc, shader: ShaderDesc, group_size: [u32; 3]) -> Self {
+        Self {
+            desc,
+            shader,
+            group_size,
+        }
+    }
+}
+
 impl ComputePipeline {
-    pub fn new(
-        device: Arc<Device>,
-        shader: ShaderDesc,
-        desc: &ComputePipelineDesc,
-    ) -> Result<Self, BackendError> {
+    pub fn new(device: Arc<Device>, desc: ComputePipelineDesc) -> Result<Self, BackendError> {
         let common = ShaderPipelineCommon::new(
             &device,
-            desc.desc,
+            &desc.desc,
             vk::ShaderStageFlags::COMPUTE,
             vk::PipelineBindPoint::COMPUTE,
         )?;
-        let compiled_shader = shader.compile(&device.raw)?;
+        let compiled_shader = desc.shader.compile(&device.raw)?;
         let shader = vk::PipelineShaderStageCreateInfo::default()
             .module(compiled_shader.module)
             .name(&compiled_shader.entry)
-            .stage(shader.stage);
+            .stage(compiled_shader.stage);
         let info = vk::ComputePipelineCreateInfo::default()
             .stage(shader)
             .layout(common.pipeline_layout);
