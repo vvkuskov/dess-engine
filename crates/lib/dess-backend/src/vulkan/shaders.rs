@@ -363,7 +363,7 @@ impl RasterPipelineDesc {
 }
 
 impl RasterPipeline {
-    pub fn new(device: Arc<Device>, desc: RasterPipelineDesc) -> Result<Self, BackendError> {
+    pub fn new(device: Arc<Device>, desc: &RasterPipelineDesc) -> Result<Self, BackendError> {
         let common = ShaderPipelineCommon::new(
             &device,
             &desc.layout,
@@ -474,7 +474,7 @@ impl ComputePipelineDesc {
 }
 
 impl ComputePipeline {
-    pub fn new(device: Arc<Device>, desc: ComputePipelineDesc) -> Result<Self, BackendError> {
+    pub fn new(device: Arc<Device>, desc: &ComputePipelineDesc) -> Result<Self, BackendError> {
         let common = ShaderPipelineCommon::new(
             &device,
             &desc.desc,
