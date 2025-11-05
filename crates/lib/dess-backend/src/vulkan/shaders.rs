@@ -265,17 +265,51 @@ impl<'a> RasterPipelineDesc<'a> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Shader {
+#[derive(Debug)]
+pub struct ShaderDesc {
+    pub bytecode: Vec<u32>,
+    pub stage: vk::ShaderStageFlags,
+    pub entry: String,
+}
+
+impl ShaderDesc {
+    pub fn new(bytecode: &[u32], stage: vk::ShaderStageFlags, entry: impl Into<String>) -> Self {
+        Self {
+            bytecode: bytecode.to_vec(),
+            stage,
+            entry: entry.into(),
+        }
+    }
+
+    fn compile(&self, device: &ash::Device) -> Result<ShaderModule, BackendError> {
+        let info = vk::ShaderModuleCreateInfo::default().code(&self.bytecode);
+        let module = unsafe { device.create_shader_module(&info, None) }?;
+        let entry = CString::new(self.entry.as_bytes()).unwrap();
+        Ok(ShaderModule {
+            module,
+            stage: self.stage,
+            entry,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct ShaderModule {
     pub module: vk::ShaderModule,
     pub stage: vk::ShaderStageFlags,
     pub entry: CString,
 }
 
+impl ShaderModule {
+    fn free(&self, device: &ash::Device) {
+        unsafe { device.destroy_shader_module(self.module, None) };
+    }
+}
+
 impl RasterPipeline {
     pub fn new(
         device: Arc<Device>,
-        shaders: &[Shader],
+        shaders: &[ShaderDesc],
         desc: RasterPipelineDesc,
     ) -> Result<Self, BackendError> {
         let common = ShaderPipelineCommon::new(
@@ -284,7 +318,11 @@ impl RasterPipeline {
             vk::ShaderStageFlags::ALL_GRAPHICS,
             vk::PipelineBindPoint::GRAPHICS,
         )?;
-        let shaders = shaders
+        let compiled_shaders = shaders
+            .iter()
+            .map(|shader| shader.compile(&device.raw).unwrap())
+            .collect::<Vec<_>>();
+        let shaders = compiled_shaders
             .iter()
             .map(|shader| {
                 vk::PipelineShaderStageCreateInfo::default()
@@ -347,6 +385,9 @@ impl RasterPipeline {
             )
         }
         .map_err(|(_, err)| BackendError::VulkanError(err))?[0];
+        compiled_shaders
+            .iter()
+            .for_each(|shader| shader.free(&device.raw));
         Ok(Self {
             device,
             pipeline,
@@ -362,17 +403,17 @@ impl Drop for RasterPipeline {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ComputePipelineDesc<'a> {
     pub desc: &'a DescriptorSetDesc<'a>,
-    pub shader: Shader,
+    pub shader: ShaderDesc,
     pub group_size: [u32; 3],
 }
 
 impl ComputePipeline {
     pub fn new(
         device: Arc<Device>,
-        shader: Shader,
+        shader: ShaderDesc,
         desc: &ComputePipelineDesc,
     ) -> Result<Self, BackendError> {
         let common = ShaderPipelineCommon::new(
@@ -381,9 +422,10 @@ impl ComputePipeline {
             vk::ShaderStageFlags::COMPUTE,
             vk::PipelineBindPoint::COMPUTE,
         )?;
+        let compiled_shader = shader.compile(&device.raw)?;
         let shader = vk::PipelineShaderStageCreateInfo::default()
-            .module(shader.module)
-            .name(&shader.entry)
+            .module(compiled_shader.module)
+            .name(&compiled_shader.entry)
             .stage(shader.stage);
         let info = vk::ComputePipelineCreateInfo::default()
             .stage(shader)
@@ -394,6 +436,7 @@ impl ComputePipeline {
                 .create_compute_pipelines(vk::PipelineCache::null(), slice::from_ref(&info), None)
                 .map_err(|(_, err)| BackendError::VulkanError(err))?[0]
         };
+        compiled_shader.free(&device.raw);
         Ok(Self {
             device,
             pipeline,
